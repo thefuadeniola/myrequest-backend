@@ -78,10 +78,17 @@ router.post('/add-request', protectRoom, async(req, res, next) => {
         const { title, artistes } = req.body;
         const room = await Room.findById(req.room._id);
 
-        console.log(artistes)
-
         if(!room) {
             return res.status(404).json({ message: "Room not found" })
+        }
+
+        const duplicate = room.requests.some(req =>
+            req.song_title.toLowerCase() === title.toLowerCase() &&
+            JSON.stringify(req.artistes.map(a => a.id).sort()) === JSON.stringify(artistes.map(a => a.id).sort())
+        );
+
+        if (duplicate) {
+            return res.status(409).json({ message: "duplicate!" });
         }
 
         room.requests.push({
@@ -89,9 +96,8 @@ router.post('/add-request', protectRoom, async(req, res, next) => {
             artistes: artistes
         })
 
-        await room.save();
-        
-        res.status(201).json(room.requests[room.requests.length - 1])
+        await room.save();       
+        res.status(201).json(room)
     } catch (error) {
         res.status(500).json({ message: error.message })
         console.log(error)
