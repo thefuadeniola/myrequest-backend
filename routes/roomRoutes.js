@@ -22,16 +22,26 @@ router.post('/create', protect, async(req, res, next) => {
 })
 
 router.post('/enter', async(req, res, next) => {
-    const { name, pin } = req.body;
-    const room = await Room.findOne({ name }).populate("admin", "username")
+    const { id, pin } = req.body;
+    const room = await Room.findById(id).populate("admin", "username")
+    if(!room) console.log("Found a matching room!")
 
     try {
         if(await room.matchPin(pin)) {
+
+            const roomToken = generateToken({roomId: room._id});
+
+            res.cookie("room_token", roomToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "lax",
+                path: "/"
+            });
+
             res.status(200).json({
                 _id: room.id,
                 name: room.name,
                 adminUsername: room.admin.username,
-                token: generateToken({roomId: room._id}),
             })
         } else res.status(401).json({ message: "Invalid room pin!" })
     } catch (error) {
@@ -48,22 +58,13 @@ router.get('/all', async (req, res, next) => {
     }
 });
 
-router.get("/:userId/:roomId", async (req, res) => {
+router.get("/:roomId", protectRoom, async (req, res) => {
   try {
-    const { userId, roomId } = req.params;
+    const { roomId } = req.params;
 
-    const admin = await Admin.findById(userId);
-    if (!admin) {
-      return res.status(404).json({ message: "Admin not found" });
-    }
-
-    const room = await Room.findById(roomId).populate("admin", "username");
+    const room = await Room.findById(roomId).select("-pin").populate("admin", "username");
     if (!room) {
       return res.status(404).json({ message: "Room not found" });
-    }
-
-    if (room.admin._id.toString() !== userId) {
-      return res.status(403).json({ message: "Not authorized to access this room" });
     }
 
     res.json(room);
@@ -74,23 +75,32 @@ router.get("/:userId/:roomId", async (req, res) => {
 
 router.post('/add-request', protectRoom, async(req, res, next) => {
     try {
-        const {title, artistes} = req.body;
+        const { title, artistes } = req.body;
         const room = await Room.findById(req.room._id);
 
         if(!room) {
             return res.status(404).json({ message: "Room not found" })
         }
 
+        const duplicate = room.requests.some(req =>
+            req.song_title.toLowerCase() === title.toLowerCase() &&
+            JSON.stringify(req.artistes.map(a => a.id).sort()) === JSON.stringify(artistes.map(a => a.id).sort())
+        );
+
+        if (duplicate) {
+            return res.status(409).json({ message: "duplicate!" });
+        }
+
         room.requests.push({
             song_title: title,
-            artistes: [...artistes]
+            artistes: artistes
         })
 
-        await room.save();
-        
-        res.status(201).json(room.requests[room.requests.length - 1])
+        await room.save();       
+        res.status(201).json(room)
     } catch (error) {
         res.status(500).json({ message: error.message })
+        console.log(error)
     }
 })
 
